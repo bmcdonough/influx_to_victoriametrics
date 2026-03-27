@@ -10,7 +10,12 @@ import pandas as pd
 import requests
 
 from typing import Iterable, Dict, List
+import warnings
+
 from influxdb_client import InfluxDBClient
+from influxdb_client.client.warnings import MissingPivotFunction
+
+warnings.simplefilter("ignore", MissingPivotFunction)
 
 
 try:
