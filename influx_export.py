@@ -26,6 +26,26 @@ except ImportError:
     pass
 
 
+def escape_lp_key(value: str) -> str:
+    """Escape special characters in line protocol measurement names, tag keys/values, and field keys."""
+    return value.replace("\\", "\\\\").replace(",", "\\,").replace("=", "\\=").replace(" ", "\\ ")
+
+
+def format_field_value(series: pd.Series) -> pd.Series:
+    """Format a field value column for line protocol.
+
+    Numeric values are written as-is. Non-numeric (string) values are
+    double-quoted with internal backslashes and double-quotes escaped.
+    """
+    if pd.api.types.is_numeric_dtype(series):
+        return series.astype(str)
+    return (
+        '"'
+        + series.astype(str).str.replace("\\", "\\\\", regex=False).str.replace('"', '\\"', regex=False)
+        + '"'
+    )
+
+
 def get_tag_cols(dataframe_keys: Iterable) -> Iterable:
     """Filter out dataframe keys that are not tags"""
     return (
@@ -47,16 +67,17 @@ def get_influxdb_lines(df: pd.DataFrame) -> str:
 
     Protocol description: https://docs.influxdata.com/influxdb/v2.0/reference/syntax/line-protocol/
     """
-    line = df["_measurement"]
+    line = df["_measurement"].apply(escape_lp_key)
 
     for col_name in get_tag_cols(df):
-        line += ("," + col_name + "=") + df[col_name].astype(str)
+        escaped_key = escape_lp_key(col_name)
+        line += ("," + escaped_key + "=") + df[col_name].astype(str).apply(escape_lp_key)
 
     line += (
         " "
-        + df["_field"]
+        + df["_field"].apply(escape_lp_key)
         + "="
-        + df["_value"].astype(str)
+        + format_field_value(df["_value"])
         + " "
         + df["_time"].astype(int).astype(str)
     )
@@ -104,7 +125,9 @@ def main(args: Dict[str, str]):
 
         line = get_influxdb_lines(df)
         # "db" is added as an extra tag for the value.
-        requests.post(f"{url}/write?db={bucket}", data=line)
+        resp = requests.post(f"{url}/write?db={bucket}", data=line)
+        if not resp.ok:
+            print(f"  ERROR writing {meas}_{field}: HTTP {resp.status_code} {resp.text}")
 
 
 if __name__ == "__main__":
